@@ -22,7 +22,7 @@ A modern, AI-powered interface that allows users to query their database using n
 
 ![Welcome Page](./public/assets/images/main.png)
 
-> **Live Demo**: [https://your-netlify-app.netlify.app](https://dat-ai.netlify.app)
+> **Live Demo**: [dat-ai.netlify.app](https://dat-ai.netlify.app)
 
 *Watch how DataChat AI transforms natural language questions into insightful data visualizations in real-time!*
 
