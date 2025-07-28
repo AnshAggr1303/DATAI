@@ -64,6 +64,15 @@ IMPORTANT DATABASE RULES:
 - Use table aliases (u for users, o for orders, oi for order_items, p for products, i for invoices)
 - Always include relevant context columns for better understanding
 
+CRITICAL JOIN RULES:
+- orders.id = invoices.order_id (CORRECT: o.id = i.order_id)
+- users.id = orders.user_id (CORRECT: u.id = o.user_id)
+- products.id = order_items.product_id (CORRECT: p.id = oi.product_id)
+- orders.id = order_items.order_id (CORRECT: o.id = oi.order_id)
+
+NEVER USE: o.order_id (this column does not exist!)
+ALWAYS USE: o.id = i.order_id (to join orders with invoices)
+
 BUSINESS CONTEXT UNDERSTANDING:
 - Revenue queries: Use paid invoices (invoices with paid_at NOT NULL) for actual revenue
 - Customer analysis: Join users with their orders/purchases
@@ -98,6 +107,8 @@ SQL: SELECT u.first_name || ' ' || u.last_name as customer_name, u.email, COUNT(
 CHART: bar
 MESSAGE: Here are your top customers ranked by total payments received. These are your most valuable customers who actually pay their invoices.
 INSIGHTS: ["Top 20 paying customers", "Includes contact information", "Shows purchase frequency", "Based on actual payments received"]
+
+REMEMBER: NEVER write o.order_id - orders table has 'id', invoices table has 'order_id'
 
 Question: "Which products sell best?"
 SQL: SELECT p.name as product_name, p.category, COUNT(oi.id) as times_ordered, SUM(oi.quantity) as total_quantity_sold, SUM(oi.quantity * oi.price) as total_revenue FROM products p JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name, p.category ORDER BY total_quantity_sold DESC LIMIT 20
@@ -216,9 +227,18 @@ function cleanSQLQuery(sqlQuery: string): string {
     sqlQuery = sqlQuery.slice(0, -1).trim()
   }
   
+  // Fix common JOIN mistakes
+  sqlQuery = sqlQuery.replace(/o\.order_id\s*=\s*o\.id/gi, 'o.id = i.order_id')
+  sqlQuery = sqlQuery.replace(/orders\.order_id\s*=\s*orders\.id/gi, 'orders.id = invoices.order_id')
+  
   // Validation
   if (!sqlQuery.toLowerCase().startsWith('select')) {
     throw new Error('Only SELECT queries are allowed')
+  }
+  
+  // Check for invalid column references
+  if (sqlQuery.toLowerCase().includes('o.order_id')) {
+    throw new Error('Invalid column reference: o.order_id does not exist. Use o.id = i.order_id instead')
   }
   
   // Check for dangerous keywords
@@ -281,7 +301,7 @@ function generateFallbackQuery(question: string, schemas: any[]): string {
     }
   }
   
-  // Customer related queries
+  // Customer related queries - FIXED JOIN CONDITION
   if (lowerQuestion.match(/\b(customer|client|user|buyer)\b/)) {
     if (tableNames.includes('users') && tableNames.includes('orders')) {
       return `SELECT u.first_name || ' ' || u.last_name as customer_name, u.email, COUNT(o.id) as order_count, COALESCE(SUM(o.total_amount), 0) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.first_name, u.last_name, u.email ORDER BY total_spent DESC LIMIT 20`
@@ -301,7 +321,7 @@ function generateFallbackQuery(question: string, schemas: any[]): string {
     }
   }
   
-  // Order related queries
+  // Order related queries - FIXED JOIN CONDITION
   if (lowerQuestion.match(/\b(order|purchase|transaction)\b/)) {
     if (tableNames.includes('orders') && tableNames.includes('users')) {
       return `SELECT o.id, u.first_name || ' ' || u.last_name as customer_name, o.total_amount, o.status, o.created_at FROM orders o JOIN users u ON o.user_id = u.id ORDER BY o.created_at DESC LIMIT 20`
