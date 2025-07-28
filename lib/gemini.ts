@@ -23,8 +23,8 @@ export async function generateSmartSQL(question: string, detailedSchemas: any[])
       : ''
     
     const sampleInfo = schema.sample_data?.length > 0
-      ? `\nSample Data: ${JSON.stringify(schema.sample_data.slice(0, 2), null, 2)}`
-      : ''
+      ? `\nSample Data (${schema.row_count} total rows): ${JSON.stringify(schema.sample_data.slice(0, 2), null, 2)}`
+      : `\nTotal Rows: ${schema.row_count || 0}`
     
     return `
 Table: ${schema.table_name}
@@ -34,104 +34,99 @@ Columns: ${schema.columns.map((col: any) =>
 `
   }).join('\n')
   
+  const availableTables = detailedSchemas.map(s => s.table_name).join(', ')
+  
   const prompt = `
-You are an expert PostgreSQL developer and data analyst for an e-commerce database. Analyze the user's question and generate:
-1. A PostgreSQL SELECT query
-2. The best chart type for visualization
-3. A helpful response message
-4. Key insights about what the data shows
+You are an expert PostgreSQL developer and data analyst. The database contains business/e-commerce data. Your task is to:
+1. Understand the user's business question
+2. Automatically determine which tables are needed
+3. Generate the appropriate PostgreSQL query
+4. Suggest the best visualization type
+5. Provide helpful insights
 
-E-COMMERCE DATABASE SCHEMA:
-- users: Customer accounts (id, first_name, last_name, email, created_at, updated_at)
-- orders: Order records (id, user_id→users.id, total_amount, status, created_at)
-- invoices: Payment tracking (id, order_id→orders.id, amount, paid_at, created_at)  
-- products: Product catalog (id, name, price, category, created_at)
-- order_items: Order line items (id, order_id→orders.id, product_id→products.id, quantity, price)
+AVAILABLE DATABASE SCHEMA:
+${schemaContext}
 
-RELATIONSHIPS:
-- users.id → orders.user_id (customers have multiple orders)
-- orders.id → invoices.order_id (orders can have multiple invoices)
-- orders.id → order_items.order_id (orders contain multiple items)
-- products.id → order_items.product_id (products appear in multiple orders)
+AVAILABLE TABLES: ${availableTables}
 
-RULES FOR SQL:
+IMPORTANT DATABASE RULES:
 - Only generate SELECT queries (no INSERT, UPDATE, DELETE, DROP, etc.)
 - Use proper PostgreSQL syntax and functions
 - Use appropriate JOINs when querying multiple tables
 - Add meaningful column aliases for calculated fields
-- Use LIMIT 20 unless user specifies otherwise or asks for "all"
+- Use LIMIT 50 unless user asks for "all" or specifies a number
 - Use aggregate functions (COUNT, SUM, AVG, MAX, MIN) when appropriate
 - For "top" or "highest" queries, use ORDER BY with LIMIT
-- For date ranges, use proper timestamp comparisons with DATE_TRUNC for grouping
+- For date/time analysis, use DATE_TRUNC for grouping by periods
 - Do NOT include semicolons at the end of the query
 - Format numbers and dates appropriately
 - Use COALESCE for handling null values in calculations
-- Use table aliases for cleaner queries (u for users, o for orders, oi for order_items, p for products, i for invoices)
+- Use table aliases (u for users, o for orders, oi for order_items, p for products, i for invoices)
+- Always include relevant context columns for better understanding
 
-COMMON E-COMMERCE QUERY PATTERNS:
-- Customer analysis: JOIN users u with orders o ON u.id = o.user_id
-- Sales by product: JOIN order_items oi with products p ON oi.product_id = p.id
-- Revenue analysis: Use invoices i with paid_at for actual payments
-- Order details: JOIN orders o with order_items oi and products p for complete order info
-- Top customers: GROUP BY customer with SUM(order amounts) ORDER BY total DESC
+BUSINESS CONTEXT UNDERSTANDING:
+- Revenue queries: Use paid invoices (invoices with paid_at NOT NULL) for actual revenue
+- Customer analysis: Join users with their orders/purchases
+- Product performance: Use order_items to see what's actually selling
+- Sales trends: Group by time periods using DATE_TRUNC
+- Top performers: Use ORDER BY with LIMIT
+- Recent activity: Use date filters like created_at >= CURRENT_DATE - INTERVAL 'X days'
 
-CHART TYPE SELECTION:
-- 'line': For time series, trends over time, temporal data (keywords: trend, over time, monthly, daily, growth, change)
-- 'bar': For comparisons, rankings, categories (keywords: top, best, compare, most, highest, lowest, by category)
-- 'pie': For distributions, percentages, parts of whole (keywords: distribution, breakdown, percentage, share, proportion)
-- 'table': For detailed data, lists, when specific values are requested (keywords: list, show me, details, all)
+CHART TYPE SELECTION RULES:
+- 'line': Time series data, trends over time, temporal analysis (monthly sales, growth trends)
+- 'bar': Comparisons, rankings, categories (top customers, product performance, category breakdown)
+- 'pie': Distributions, percentages, parts of whole (market share, category splits)
+- 'table': Detailed listings, specific records, when users want to see individual items
 
 RESPONSE MESSAGE GUIDELINES:
-- Be conversational and helpful
-- Explain what the data shows in business terms
-- Mention key findings or patterns
-- Keep it concise but informative
+- Be conversational and business-focused
+- Explain what the data shows in simple terms
+- Mention key business insights
+- Use natural language, avoid technical jargon
+- Address the user directly ("Here's your..." or "Your data shows...")
 
-DATABASE SCHEMA DETAILS:
-${schemaContext}
+BUSINESS QUERY EXAMPLES:
 
-Available Tables: ${detailedSchemas.map(s => s.table_name).join(', ')}
-
-EXAMPLE E-COMMERCE QUERIES:
-
-For "Show me monthly revenue trends":
-SQL: SELECT DATE_TRUNC('month', i.paid_at) as month, SUM(i.amount) as revenue FROM invoices i WHERE i.paid_at IS NOT NULL AND i.paid_at >= CURRENT_DATE - INTERVAL '12 months' GROUP BY month ORDER BY month
+Question: "What's our monthly revenue trend?"
+SQL: SELECT DATE_TRUNC('month', i.paid_at) as month, SUM(i.amount) as revenue, COUNT(DISTINCT i.order_id) as orders_paid FROM invoices i WHERE i.paid_at IS NOT NULL AND i.paid_at >= CURRENT_DATE - INTERVAL '12 months' GROUP BY month ORDER BY month
 CHART: line
-MESSAGE: Here's your monthly revenue trend based on paid invoices over the past year. You can see seasonal patterns and growth trajectory.
-INSIGHTS: ["12 months of revenue data analyzed", "Based on actual paid invoices", "Shows seasonal payment patterns"]
+MESSAGE: Here's your monthly revenue trend based on actually paid invoices over the past year. This shows your real cash flow and business growth patterns.
+INSIGHTS: ["12 months of actual revenue data", "Based on paid invoices only", "Shows seasonal business patterns", "Includes order volume metrics"]
 
-For "Who are my top 5 customers by spending":
-SQL: SELECT u.first_name || ' ' || u.last_name as customer_name, u.email, COUNT(o.id) as total_orders, SUM(o.total_amount) as total_spent FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.first_name, u.last_name, u.email ORDER BY total_spent DESC LIMIT 5
+Question: "Who are my best customers?"
+SQL: SELECT u.first_name || ' ' || u.last_name as customer_name, u.email, COUNT(o.id) as total_orders, SUM(COALESCE(i.amount, 0)) as total_paid, MAX(o.created_at) as last_order_date FROM users u LEFT JOIN orders o ON u.id = o.user_id LEFT JOIN invoices i ON o.id = i.order_id AND i.paid_at IS NOT NULL GROUP BY u.id, u.first_name, u.last_name, u.email HAVING COUNT(o.id) > 0 ORDER BY total_paid DESC LIMIT 20
 CHART: bar
-MESSAGE: Here are your top 5 customers by total order value. These are your most valuable customers for retention focus.
-INSIGHTS: ["Top 5 customers by order value", "Includes order count per customer", "VIP customer segment for retention"]
+MESSAGE: Here are your top customers ranked by total payments received. These are your most valuable customers who actually pay their invoices.
+INSIGHTS: ["Top 20 paying customers", "Includes contact information", "Shows purchase frequency", "Based on actual payments received"]
 
-For "Product category performance":
-SQL: SELECT p.category, COUNT(DISTINCT p.id) as unique_products, SUM(oi.quantity) as total_sold, SUM(oi.quantity * oi.price) as category_revenue FROM products p LEFT JOIN order_items oi ON p.id = oi.product_id GROUP BY p.category ORDER BY category_revenue DESC
-CHART: pie  
-MESSAGE: This shows how your product categories are performing by sales volume and revenue contribution.
-INSIGHTS: ["Category performance breakdown", "Revenue and quantity metrics", "Product portfolio analysis"]
+Question: "Which products sell best?"
+SQL: SELECT p.name as product_name, p.category, COUNT(oi.id) as times_ordered, SUM(oi.quantity) as total_quantity_sold, SUM(oi.quantity * oi.price) as total_revenue FROM products p JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name, p.category ORDER BY total_quantity_sold DESC LIMIT 20
+CHART: bar
+MESSAGE: Here are your best-selling products by quantity sold, along with their revenue contribution and order frequency.
+INSIGHTS: ["Top 20 products by sales volume", "Includes revenue per product", "Shows category distribution", "Order frequency included"]
 
-For "Recent unpaid invoices":
-SQL: SELECT u.first_name || ' ' || u.last_name as customer_name, o.id as order_id, i.amount, i.created_at FROM invoices i JOIN orders o ON i.order_id = o.id JOIN users u ON o.user_id = u.id WHERE i.paid_at IS NULL ORDER BY i.created_at DESC LIMIT 20
+Question: "Show me recent unpaid orders"
+SQL: SELECT u.first_name || ' ' || u.last_name as customer_name, u.email, o.id as order_id, o.total_amount, o.status, o.created_at, CASE WHEN i.id IS NULL THEN 'No Invoice' ELSE 'Invoice Created' END as invoice_status FROM orders o JOIN users u ON o.user_id = u.id LEFT JOIN invoices i ON o.id = i.order_id WHERE (i.paid_at IS NULL OR i.id IS NULL) AND o.created_at >= CURRENT_DATE - INTERVAL '30 days' ORDER BY o.created_at DESC LIMIT 30
 CHART: table
-MESSAGE: Here are your recent unpaid invoices that need attention for payment collection.
-INSIGHTS: ["Unpaid invoices identified", "Sorted by invoice date", "Customer contact info included"]
+MESSAGE: Here are your recent orders from the last 30 days that haven't been paid yet. This helps you track which customers need payment follow-up.
+INSIGHTS: ["Last 30 days of unpaid orders", "Customer contact info included", "Invoice status tracking", "Sorted by order date"]
 
-For "Best selling products":
-SQL: SELECT p.name, p.category, SUM(oi.quantity) as total_sold, SUM(oi.quantity * oi.price) as total_revenue FROM products p JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name, p.category ORDER BY total_sold DESC LIMIT 10
+Question: "How many new customers this month?"
+SQL: SELECT DATE_TRUNC('month', created_at) as month, COUNT(*) as new_customers FROM users WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY month
 CHART: bar
-MESSAGE: Here are your best-selling products by quantity sold, along with their revenue contribution.
-INSIGHTS: ["Top 10 products by sales volume", "Revenue per product calculated", "Product performance ranking"]
+MESSAGE: Here's your new customer acquisition for the current month compared to previous months.
+INSIGHTS: ["Current month customer growth", "Monthly comparison available", "New user registrations tracked"]
 
-User Question: "${question}"
+Now analyze the user's question: "${question}"
+
+IMPORTANT: Always choose the most relevant tables automatically based on the question. Don't ask the user to select tables.
 
 Return your response in this exact JSON format:
 {
-  "sqlQuery": "your_sql_query_here",
+  "sqlQuery": "your_postgresql_query_here",
   "chartType": "line|bar|pie|table",
-  "responseMessage": "your_helpful_message_here",
-  "insights": ["insight1", "insight2", "insight3"]
+  "responseMessage": "your_helpful_business_message_here",
+  "insights": ["insight1", "insight2", "insight3", "insight4"]
 }
 `
 
@@ -156,8 +151,8 @@ Return your response in this exact JSON format:
       return {
         sqlQuery: sqlQuery || generateFallbackQuery(question, detailedSchemas),
         chartType: detectChartTypeFromQuestion(question),
-        responseMessage: `I've generated a query based on your question: "${question}"`,
-        insights: [`Query generated for: ${question}`]
+        responseMessage: `I've analyzed your question "${question}" and generated a query based on your available data.`,
+        insights: [`Analysis completed for: ${question}`, `Using available tables: ${availableTables}`]
       }
     }
     
@@ -174,10 +169,10 @@ Return your response in this exact JSON format:
     return {
       sqlQuery,
       chartType,
-      responseMessage: parsedResponse.responseMessage || `Here's the analysis for: ${question}`,
+      responseMessage: parsedResponse.responseMessage || `Here's the analysis for your question: "${question}"`,
       insights: Array.isArray(parsedResponse.insights) 
-        ? parsedResponse.insights.slice(0, 3) 
-        : [`Analysis completed for: ${question}`]
+        ? parsedResponse.insights.slice(0, 4) 
+        : [`Analysis completed for: ${question}`, `Tables analyzed: ${availableTables}`]
     }
     
   } catch (error) {
@@ -187,8 +182,8 @@ Return your response in this exact JSON format:
     return {
       sqlQuery: generateFallbackQuery(question, detailedSchemas),
       chartType: detectChartTypeFromQuestion(question),
-      responseMessage: `I've generated a basic query for your question. The results will help answer "${question}"`,
-      insights: [`Fallback query generated`, `Question: ${question}`]
+      responseMessage: `I've generated an analysis for your question: "${question}". The results should help provide the insights you're looking for.`,
+      insights: [`Fallback query generated`, `Question analyzed: ${question}`, `Available data sources used`]
     }
   }
 }
@@ -263,67 +258,96 @@ function detectChartTypeFromQuestion(question: string): 'line' | 'bar' | 'pie' |
     return 'bar'
   }
   
+  // List/detail patterns for table
+  if (lowerQuestion.match(/\b(show me|list|details|recent|latest|all|who are|what are)\b/)) {
+    return 'table'
+  }
+  
   // Default to table for detailed queries
   return 'table'
 }
 
 function generateFallbackQuery(question: string, schemas: any[]): string {
   const lowerQuestion = question.toLowerCase()
-  
-  // E-commerce specific fallback queries
   const tableNames = schemas.map(s => s.table_name)
   
-  if (lowerQuestion.includes('revenue') || lowerQuestion.includes('sales') || lowerQuestion.includes('money')) {
+  // Revenue/Sales related queries
+  if (lowerQuestion.match(/\b(revenue|sales|money|income|earnings|profit)\b/)) {
     if (tableNames.includes('invoices')) {
-      return `SELECT DATE_TRUNC('month', paid_at) as month, SUM(amount) as revenue FROM invoices WHERE paid_at IS NOT NULL AND paid_at >= CURRENT_DATE - INTERVAL '6 months' GROUP BY month ORDER BY month`
+      return `SELECT DATE_TRUNC('month', paid_at) as month, SUM(amount) as revenue, COUNT(*) as paid_invoices FROM invoices WHERE paid_at IS NOT NULL AND paid_at >= CURRENT_DATE - INTERVAL '6 months' GROUP BY month ORDER BY month`
     }
     if (tableNames.includes('orders')) {
-      return `SELECT DATE_TRUNC('month', created_at) as month, SUM(total_amount) as revenue FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '6 months' GROUP BY month ORDER BY month`
+      return `SELECT DATE_TRUNC('month', created_at) as month, SUM(total_amount) as revenue, COUNT(*) as orders FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '6 months' GROUP BY month ORDER BY month`
     }
   }
   
-  if (lowerQuestion.includes('customer') && tableNames.includes('users') && tableNames.includes('orders')) {
-    return `SELECT u.first_name || ' ' || u.last_name as customer_name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.first_name, u.last_name ORDER BY total_spent DESC LIMIT 10`
-  }
-  
-  if (lowerQuestion.includes('product') && tableNames.includes('products')) {
-    if (tableNames.includes('order_items')) {
-      return `SELECT p.name, p.category, p.price, COUNT(oi.id) as times_ordered, SUM(oi.quantity) as total_sold FROM products p LEFT JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name, p.category, p.price ORDER BY total_sold DESC LIMIT 10`
+  // Customer related queries
+  if (lowerQuestion.match(/\b(customer|client|user|buyer)\b/)) {
+    if (tableNames.includes('users') && tableNames.includes('orders')) {
+      return `SELECT u.first_name || ' ' || u.last_name as customer_name, u.email, COUNT(o.id) as order_count, COALESCE(SUM(o.total_amount), 0) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.first_name, u.last_name, u.email ORDER BY total_spent DESC LIMIT 20`
     }
-    return `SELECT name, category, price FROM products ORDER BY price DESC LIMIT 10`
-  }
-  
-  if (lowerQuestion.includes('order') && tableNames.includes('orders')) {
     if (tableNames.includes('users')) {
-      return `SELECT o.id, u.first_name || ' ' || u.last_name as customer_name, o.total_amount, o.status, o.created_at FROM orders o JOIN users u ON o.user_id = u.id ORDER BY o.created_at DESC LIMIT 10`
+      return `SELECT first_name, last_name, email, created_at FROM users ORDER BY created_at DESC LIMIT 20`
     }
-    return `SELECT id, user_id, total_amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 10`
   }
   
-  if (lowerQuestion.includes('invoice') && tableNames.includes('invoices')) {
-    return `SELECT i.id, i.order_id, i.amount, i.paid_at, i.created_at FROM invoices i ORDER BY i.created_at DESC LIMIT 10`
+  // Product related queries
+  if (lowerQuestion.match(/\b(product|item|inventory|catalog)\b/)) {
+    if (tableNames.includes('products') && tableNames.includes('order_items')) {
+      return `SELECT p.name, p.category, p.price, COUNT(oi.id) as times_ordered, SUM(oi.quantity) as total_sold FROM products p LEFT JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name, p.category, p.price ORDER BY total_sold DESC NULLS LAST LIMIT 20`
+    }
+    if (tableNames.includes('products')) {
+      return `SELECT name, category, price, created_at FROM products ORDER BY created_at DESC LIMIT 20`
+    }
   }
   
-  if (lowerQuestion.includes('unpaid') && tableNames.includes('invoices')) {
-    return `SELECT i.id, i.order_id, i.amount, i.created_at FROM invoices i WHERE i.paid_at IS NULL ORDER BY i.created_at DESC LIMIT 10`
+  // Order related queries
+  if (lowerQuestion.match(/\b(order|purchase|transaction)\b/)) {
+    if (tableNames.includes('orders') && tableNames.includes('users')) {
+      return `SELECT o.id, u.first_name || ' ' || u.last_name as customer_name, o.total_amount, o.status, o.created_at FROM orders o JOIN users u ON o.user_id = u.id ORDER BY o.created_at DESC LIMIT 20`
+    }
+    if (tableNames.includes('orders')) {
+      return `SELECT id, user_id, total_amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 20`
+    }
+  }
+  
+  // Time-based/recent queries
+  if (lowerQuestion.match(/\b(recent|latest|new|today|this month|this week)\b/)) {
+    if (tableNames.includes('orders')) {
+      return `SELECT id, user_id, total_amount, status, created_at FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '7 days' ORDER BY created_at DESC LIMIT 20`
+    }
+    if (tableNames.includes('users')) {
+      return `SELECT first_name, last_name, email, created_at FROM users WHERE created_at >= CURRENT_DATE - INTERVAL '30 days' ORDER BY created_at DESC LIMIT 20`
+    }
+  }
+  
+  // Top/best queries
+  if (lowerQuestion.match(/\b(top|best|highest|most)\b/)) {
+    if (tableNames.includes('products') && tableNames.includes('order_items')) {
+      return `SELECT p.name, SUM(oi.quantity) as total_sold, SUM(oi.quantity * oi.price) as revenue FROM products p JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name ORDER BY total_sold DESC LIMIT 10`
+    }
+    if (tableNames.includes('users') && tableNames.includes('orders')) {
+      return `SELECT u.first_name || ' ' || u.last_name as customer_name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.first_name, u.last_name ORDER BY total_spent DESC LIMIT 10`
+    }
+  }
+  
+  // Default fallbacks based on available tables
+  if (tableNames.includes('orders')) {
+    return `SELECT id, user_id, total_amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 20`
   }
   
   if (tableNames.includes('users')) {
-    return `SELECT first_name, last_name, email, created_at FROM users ORDER BY created_at DESC LIMIT 10`
-  }
-  
-  if (tableNames.includes('orders')) {
-    return `SELECT id, user_id, total_amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 10`
+    return `SELECT first_name, last_name, email, created_at FROM users ORDER BY created_at DESC LIMIT 20`
   }
   
   if (tableNames.includes('products')) {
-    return `SELECT name, category, price FROM products ORDER BY price DESC LIMIT 10`
+    return `SELECT name, category, price, created_at FROM products ORDER BY created_at DESC LIMIT 20`
   }
   
   // Ultimate fallback
   const firstTable = tableNames[0]
   if (firstTable) {
-    return `SELECT * FROM ${firstTable} LIMIT 10`
+    return `SELECT * FROM ${firstTable} ORDER BY id DESC LIMIT 10`
   }
   
   throw new Error('No suitable fallback query could be generated')

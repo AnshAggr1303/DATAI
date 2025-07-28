@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// ======= FILE: app/api/query/route.ts =======
+// ======= FILE: app/api/smart-query/route.ts =======
 import { supabase } from '@/lib/supabase'
-import { generateSQL } from '@/lib/gemini'
+import { generateSmartSQL } from '@/lib/gemini'
 import { NextResponse } from 'next/server'
 
 // Define types for better TypeScript support
@@ -29,30 +29,37 @@ interface TableSchema {
 
 export async function POST(request: Request) {
   try {
-    const { question, selectedTables } = await request.json()
+    const { question } = await request.json()
 
-    if (!question || !selectedTables || selectedTables.length === 0) {
+    if (!question) {
       return NextResponse.json(
-        { error: 'Question and selected tables are required' },
+        { error: 'Question is required' },
         { status: 400 }
       )
     }
 
-    // Get detailed table schemas including relationships
-    const detailedSchemas = await getDetailedTableSchemas(selectedTables)
+    // Get all available tables automatically
+    const availableTables = await getAllTables()
+    
+    if (availableTables.length === 0) {
+      throw new Error('No tables found in the database')
+    }
+
+    // Get detailed schemas for all tables
+    const detailedSchemas = await getDetailedTableSchemas(availableTables)
     
     if (detailedSchemas.length === 0) {
       throw new Error('No valid tables found or insufficient permissions')
     }
 
     // Generate SQL using Gemini with enhanced context
-    const sqlQuery = await generateSQL(question, detailedSchemas)
+    const smartResponse = await generateSmartSQL(question, detailedSchemas)
     
-    console.log('Generated SQL:', sqlQuery)
+    console.log('Generated SQL:', smartResponse.sqlQuery)
 
     // Execute the complex SQL query using our Supabase function
     const { data: results, error: queryError } = await supabase.rpc('execute_sql', {
-      sql_query: sqlQuery
+      sql_query: smartResponse.sqlQuery
     })
 
     if (queryError) {
@@ -76,14 +83,17 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      query: sqlQuery,
+      query: smartResponse.sqlQuery,
       results: parsedResults || [],
       rowCount: Array.isArray(parsedResults) ? parsedResults.length : 0,
-      executionTime: new Date().toISOString()
+      executionTime: new Date().toISOString(),
+      responseMessage: smartResponse.responseMessage,
+      insights: smartResponse.insights,
+      chartType: smartResponse.chartType
     })
 
   } catch (error: any) {
-    console.error('Query error:', error)
+    console.error('Smart query error:', error)
     return NextResponse.json(
       { 
         error: error.message || 'Failed to execute query',
@@ -96,10 +106,81 @@ export async function POST(request: Request) {
   }
 }
 
-async function getDetailedTableSchemas(selectedTables: string[]): Promise<TableSchema[]> {
+async function getAllTables(): Promise<string[]> {
+  try {
+    // Try the custom function first
+    const { data: tablesData, error: functionError } = await supabase
+      .rpc('get_tables_info')
+
+    if (!functionError && tablesData && Array.isArray(tablesData)) {
+      return tablesData.map((table: any) => table.name)
+    }
+
+    console.log('Custom function not available, using fallback method')
+    
+    // Fallback: Try to get tables using execute_sql function
+    const { data: sqlResult, error: sqlError } = await supabase
+      .rpc('execute_sql', {
+        sql_query: `
+          SELECT table_name 
+          FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_type = 'BASE TABLE'
+          AND table_name NOT LIKE 'pg_%'
+          ORDER BY table_name
+        `
+      })
+
+    if (!sqlError && sqlResult) {
+      let tableNames: any[] = []
+      
+      if (Array.isArray(sqlResult)) {
+        tableNames = sqlResult
+      } else if (typeof sqlResult === 'string') {
+        try {
+          const parsed = JSON.parse(sqlResult)
+          tableNames = Array.isArray(parsed) ? parsed : []
+        } catch (e) {
+          console.error('Error parsing SQL result:', e)
+          tableNames = []
+        }
+      }
+      
+      return tableNames.map((row: any) => row.table_name).filter(Boolean)
+    }
+
+    // Last resort: try known common tables
+    const commonTables = ['users', 'orders', 'products', 'invoices', 'order_items', 'customers', 'payments']
+    const existingTables: string[] = []
+
+    for (const tableName of commonTables) {
+      try {
+        const { error } = await supabase
+          .from(tableName)
+          .select('*')
+          .limit(1)
+        
+        if (!error) {
+          existingTables.push(tableName)
+        }
+      } catch (e) {
+        // Table doesn't exist, skip
+        continue
+      }
+    }
+
+    return existingTables
+
+  } catch (error) {
+    console.error('Error getting tables:', error)
+    return []
+  }
+}
+
+async function getDetailedTableSchemas(tableNames: string[]): Promise<TableSchema[]> {
   const schemas: TableSchema[] = []
   
-  for (const tableName of selectedTables) {
+  for (const tableName of tableNames) {
     try {
       // Get columns using execute_sql function
       const { data: columnsData, error: colError } = await supabase
@@ -133,8 +214,6 @@ async function getDetailedTableSchemas(selectedTables: string[]): Promise<TableS
           console.error(`Error parsing columns for ${tableName}:`, parseError)
           columns = []
         }
-      } else {
-        console.error(`Error fetching columns for ${tableName}:`, colError)
       }
 
       // Get foreign key relationships using execute_sql
@@ -165,22 +244,20 @@ async function getDetailedTableSchemas(selectedTables: string[]): Promise<TableS
           console.error(`Error parsing foreign keys for ${tableName}:`, parseError)
           foreignKeys = []
         }
-      } else if (fkError) {
-        console.error(`Error fetching foreign keys for ${tableName}:`, fkError)
       }
 
       // Get sample data for better AI context
       let sampleData: any[] = []
+      let rowCount = 0
       try {
-        const { data, error: sampleError } = await supabase
+        const { data, error: sampleError, count } = await supabase
           .from(tableName)
-          .select('*')
+          .select('*', { count: 'exact' })
           .limit(3)
 
         if (!sampleError && data) {
           sampleData = data
-        } else if (sampleError) {
-          console.warn(`Could not fetch sample data for ${tableName}:`, sampleError.message)
+          rowCount = count || 0
         }
       } catch (sampleError) {
         console.warn(`Could not fetch sample data for ${tableName}:`, sampleError)
@@ -192,7 +269,7 @@ async function getDetailedTableSchemas(selectedTables: string[]): Promise<TableS
           columns: columns,
           foreign_keys: foreignKeys,
           sample_data: sampleData,
-          row_count: sampleData.length
+          row_count: rowCount
         })
       }
     } catch (error) {

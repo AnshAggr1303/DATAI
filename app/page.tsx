@@ -1,159 +1,143 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // ======= FILE: app/page.tsx =======
 'use client'
-import { useState, useEffect } from 'react'
-import TableSelector from '@/components/TableSelector'
-import QueryInput from '@/components/QueryInput'
-import ResultsDisplay from '@/components/ResultsDisplay'
+import { useState } from 'react'
+import { ArrowRight, Sparkles } from 'lucide-react'
+import React from 'react'
+import ChatInterface from '@/components/chat/ChatInterface'
 
-interface DatabaseTable {
-  name: string
-  columns: any[]
-  rowCount: number
-}
+export default function Home() {
+  const [showChat, setShowChat] = useState(false)
+  const [initialQuestion, setInitialQuestion] = useState('')
 
-interface QueryResult {
-  query: string
-  results: any[]
-  rowCount: number
-  executionTime?: string
-}
+  const handleGetStarted = () => {
+    setShowChat(true)
+    // Update the URL without page refresh
+    window.history.pushState({ showChat: true }, '', '/chat')
+  }
 
-export default function HomePage() {
-  const [tables, setTables] = useState<DatabaseTable[]>([])
-  const [selectedTables, setSelectedTables] = useState<string[]>([])
-  const [loading, setLoading] = useState(false)
-  const [results, setResults] = useState<QueryResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [tablesLoading, setTablesLoading] = useState(true)
+  const handleQuestionSubmit = (question: string) => {
+    setInitialQuestion(question)
+    setShowChat(true)
+    // Update the URL without page refresh
+    window.history.pushState({ showChat: true, question }, '', '/chat')
+  }
 
-  // Fetch tables on component mount
-  useEffect(() => {
-    fetchTables()
+  // Handle browser back button
+  React.useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (event.state?.showChat) {
+        setShowChat(true)
+        if (event.state.question) {
+          setInitialQuestion(event.state.question)
+        }
+      } else {
+        setShowChat(false)
+        setInitialQuestion('')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
-  const fetchTables = async () => {
-    try {
-      setTablesLoading(true)
-      const response = await fetch('/api/tables')
-      const data = await response.json()
-      
-      if (response.ok) {
-        setTables(data.tables)
-      } else {
-        setError(data.error || 'Failed to fetch tables')
-      }
-    } catch (error) {
-      console.error('Error fetching tables:', error)
-      setError('Failed to connect to database')
-    } finally {
-      setTablesLoading(false)
-    }
-  }
-
-  const handleQuery = async (question: string) => {
-    try {
-      setLoading(true)
-      setError(null)
-      setResults(null)
-
-      const response = await fetch('/api/query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          question,
-          selectedTables,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        setResults(data)
-      } else {
-        setError(data.error || 'Failed to execute query')
-      }
-    } catch (error) {
-      console.error('Query error:', error)
-      setError('Failed to execute query')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (tablesLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading database tables...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error && !tables.length) {
-    return (
-      <div className="text-center py-12">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md mx-auto">
-          <h2 className="text-lg font-semibold text-red-800 mb-2">Connection Error</h2>
-          <p className="text-red-700 mb-4">{error}</p>
-          <button
-            onClick={fetchTables}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-          >
-            Retry Connection
-          </button>
-        </div>
-      </div>
-    )
+  if (showChat) {
+    return <ChatInterface initialQuestion={initialQuestion} onGoHome={() => {
+      setShowChat(false)
+      setInitialQuestion('')
+      window.history.pushState({}, '', '/')
+    }} />
   }
 
   return (
-    <div className="space-y-8">
-      {/* Welcome Section */}
-      <div className="text-center py-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-4">
-          Welcome to DATAI
-        </h1>
-        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-          Ask complex questions about your data in plain English. 
-          Select the tables you want to query, then type your question.
-        </p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* Main Content */}
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        {/* Hero Section */}
+        <div className="text-center mb-16">
+          <div className="mb-8">
+            <h1 className="text-5xl font-bold text-gray-900 mb-4">
+              Talk with your{' '}
+              <span className="bg-gradient-to-r from-purple-600 via-blue-600 to-orange-500 bg-clip-text text-transparent">
+                Data
+              </span>
+            </h1>
+            <p className="text-xl text-gray-600 mb-2">
+              Query, analyse, and unlock insights with natural language.
+            </p>
+            <p className="text-lg text-gray-500">
+              AI-powered SQL agent for effortless data exploration.
+            </p>
+          </div>
 
-      {/* Main Interface */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
-        <TableSelector
-          tables={tables}
-          selectedTables={selectedTables}
-          onTableSelect={setSelectedTables}
-        />
+          {/* Input Section */}
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
+            <div className="flex items-center justify-center mb-6">
+              <div className="bg-gray-100 rounded-full p-3 mr-4">
+                <Sparkles className="w-6 h-6 text-gray-600" />
+              </div>
+              <span className="text-gray-600 font-medium">Hey, which data do you want to see?</span>
+            </div>
+            
+            <form onSubmit={(e) => {
+              e.preventDefault()
+              const formData = new FormData(e.target as HTMLFormElement)
+              const question = formData.get('question') as string
+              if (question.trim()) {
+                handleQuestionSubmit(question.trim())
+              }
+            }}>
+              <div className="flex items-center space-x-4">
+                <input
+                  name="question"
+                  type="text"
+                  placeholder="Show me the pricing plans"
+                  className="flex-1 px-6 py-4 text-lg border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
+                />
+                <button
+                  type="submit"
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all flex items-center space-x-2 font-medium"
+                >
+                  <span>Ask AI</span>
+                  <ArrowRight className="w-5 h-5" />
+                </button>
+              </div>
+            </form>
+          </div>
 
-        <QueryInput
-          onQuery={handleQuery}
-          loading={loading}
-          selectedTables={selectedTables}
-        />
+          {/* Quick Start Button */}
+          <button
+            onClick={handleGetStarted}
+            className="bg-white text-gray-700 border border-gray-300 px-8 py-3 rounded-xl hover:bg-gray-50 transition-colors font-medium"
+          >
+            Get Started
+          </button>
+        </div>
 
-        <ResultsDisplay
-          results={results}
-          query={results?.query}
-          error={error}
-          loading={loading}
-        />
-      </div>
-
-      {/* Info Section */}
-      <div className="text-center text-sm text-gray-500">
-        <p>
-          DATAI uses AI to convert your natural language questions into SQL queries.
-          <br />
-          All queries are read-only for your data safety.
-        </p>
-      </div>
+        {/* Example Queries */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+          <h3 className="text-lg font-semibold text-gray-900 mb-6 text-center">
+            Try these example queries
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[
+              "What's our monthly revenue trend?",
+              "Who are our top 5 customers?",
+              "Which products sell best?",
+              "Show me recent unpaid orders"
+            ].map((query, index) => (
+              <button
+                key={index}
+                onClick={() => handleQuestionSubmit(query)}
+                className="text-left p-4 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all group"
+              >
+                <span className="text-gray-700 group-hover:text-blue-700">
+                  {query}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </main>
     </div>
   )
 }
