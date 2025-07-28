@@ -14,8 +14,7 @@
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://choosealicense.com/licenses/mit/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](http://makeapullrequest.com)
-[![Contributors](https://img.shields.io/github/contributors/AnshAgg1303/DATAI?style=for-the-badge)](https://github.com/AnshAgg1303/DATAI/graphs/contributors)
-[![Last Commit](https://img.shields.io/github/last-commit/AnshAgg1303/DATAI?style=for-the-badge)](https://github.com/AnshAgg1303/DATAI/commits/main)
+
 
 A modern, AI-powered interface that allows users to query their database using natural language. Built with Next.js, TypeScript, and powered by Google's Gemini AI.
 
@@ -23,7 +22,7 @@ A modern, AI-powered interface that allows users to query their database using n
 
 ![Welcome Page](./public/assets/images/main.png)
 
-> **Live Demo**: [https://your-netlify-app.netlify.app](https://your-netlify-app.netlify.app)
+> **Live Demo**: [https://your-netlify-app.netlify.app](https://dat-ai.netlify.app)
 
 *Watch how DataChat AI transforms natural language questions into insightful data visualizations in real-time!*
 
